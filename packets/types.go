@@ -26,8 +26,8 @@ const (
 
 var (
 	ErrTooShort        = errors.New("packets.buffer: too short buffer")
-	ErrNotImplemented  = errors.New("Method Is Not Implemented")
-	ErrBadPacketFormat = errors.New("Bad Packet Format")
+	ErrNotImplemented  = errors.New("method Is not implemented")
+	ErrBadPacketFormat = errors.New("bad packet format")
 )
 
 type MolePacketer interface {

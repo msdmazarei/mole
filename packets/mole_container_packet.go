@@ -2,8 +2,9 @@ package packets
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
+
+	"github.com/sirupsen/logrus"
 )
 
 type MoleContainerPacket struct {
@@ -12,18 +13,23 @@ type MoleContainerPacket struct {
 	MolePacket MolePacketer
 }
 
+const (
+	containerPacketHeaderLen = 3
+	indexOfPktType = 2
+)
+
 func NewMoleContainerPacket(molePacket MolePacketer) MoleContainerPacket {
-	mole_packet_len := uint16(0)
-	var pkt_type PacketType
+	molePacketLen := uint16(0)
+	var pktType PacketType
 	if molePacket != nil {
-		mole_packet_len = molePacket.TotalLength()
-		pkt_type = molePacket.GetPacketType()
+		molePacketLen = molePacket.TotalLength()
+		pktType = molePacket.GetPacketType()
 	} else {
-		pkt_type = ContainerPacketType
+		pktType = ContainerPacketType
 	}
 	return MoleContainerPacket{
-		length:     3 + mole_packet_len,
-		PacketType: pkt_type,
+		length:     containerPacketHeaderLen + molePacketLen,
+		PacketType: pktType,
 		MolePacket: molePacket,
 	}
 }
@@ -33,17 +39,16 @@ func (mcp *MoleContainerPacket) WriteTo(buf []byte) error {
 	if uint16(len(buf)) < mcp.TotalLength() {
 		return ErrTooShort
 	}
-	binary.BigEndian.PutUint16(buf[0:], mcp.length)
-	buf[2] = byte(mcp.MolePacket.GetPacketType())
+	binary.BigEndian.PutUint16(buf, mcp.length)
+	buf[indexOfPktType] = byte(mcp.MolePacket.GetPacketType())
 	if mcp.MolePacket != nil {
-		return mcp.MolePacket.WriteTo(buf[3:])
+		return mcp.MolePacket.WriteTo(buf[containerPacketHeaderLen:])
 	}
 	return nil
-
 }
 func (mcp *MoleContainerPacket) FromBytes(buf []byte) error {
-	mcp.length = binary.BigEndian.Uint16(buf[0:])
-	mcp.PacketType = PacketType(buf[2])
+	mcp.length = binary.BigEndian.Uint16(buf)
+	mcp.PacketType = PacketType(buf[indexOfPktType])
 	switch mcp.PacketType {
 	case AuthAcceptType:
 		mcp.MolePacket = &AuthAcceptPacket{}
@@ -62,17 +67,17 @@ func (mcp *MoleContainerPacket) FromBytes(buf []byte) error {
 	case ReportType:
 		mcp.MolePacket = &ReportPacket{}
 	case EncapsulatedNetDevPacketType:
-		encpkt := NewEncapsulateNetDevPacket(buf[3:mcp.length])
+		encpkt := NewEncapsulateNetDevPacket(buf[containerPacketHeaderLen:mcp.length])
 		mcp.MolePacket = &encpkt
 	default:
-		fmt.Printf("receiving not parsable packet: %+v\n", buf)
+		logrus.Warn("receiving not parsable packet:", buf)
 		return ErrNotImplemented
 	}
 	var err error
 	if mcp.PacketType != EncapsulatedNetDevPacketType {
-		err = mcp.MolePacket.FromBytes(buf[3:])
+		err = mcp.MolePacket.FromBytes(buf[containerPacketHeaderLen:])
 	}
-	if mcp.length != mcp.MolePacket.TotalLength()+3 {
+	if mcp.length != mcp.MolePacket.TotalLength()+containerPacketHeaderLen {
 		err = ErrBadPacketFormat
 	}
 	return err
@@ -80,15 +85,18 @@ func (mcp *MoleContainerPacket) FromBytes(buf []byte) error {
 
 func (mcp *MoleContainerPacket) TotalLength() uint16 {
 	if mcp.MolePacket == nil {
-		return 3
+		return containerPacketHeaderLen
 	}
-	return 3 + mcp.MolePacket.TotalLength()
+	return containerPacketHeaderLen + mcp.MolePacket.TotalLength()
 }
 func (mcp *MoleContainerPacket) GetPacketType() PacketType {
 	return ContainerPacketType
 }
 func (mcp *MoleContainerPacket) Write(w io.Writer) (int, error) {
 	buf := make([]byte, mcp.TotalLength())
-	mcp.WriteTo(buf)
+	err := mcp.WriteTo(buf)
+	if err != nil {
+		return 0, err
+	}
 	return w.Write(buf)
 }

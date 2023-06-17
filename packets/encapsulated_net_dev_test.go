@@ -9,8 +9,8 @@ import (
 var _ = Describe("EncapsulatedNetDevPacket", func() {
 	var pkt EncapsulatedNetDevPacket
 	BeforeEach(func() {
-		buf_l := rand.Intn(100) + 10
-		buf := make([]byte, buf_l)
+		bufl := rand.Intn(100) + 10
+		buf := make([]byte, bufl)
 		rand.Read(buf)
 		pkt = NewEncapsulateNetDevPacket(buf)
 	})

@@ -7,27 +7,27 @@ import (
 
 var _ = Describe("StatusMessage", func() {
 	const (
-		sample_status  = 10
-		sample_message = "hello"
+		sampleStatus  = 10
+		sampleMessage = "hello"
 	)
 	var pkt StatusMessagePacket[byte]
 
 	BeforeEach(func() {
-		pkt = NewStatusMessage[byte](AuthRejectType, sample_status, sample_message)
+		pkt = NewStatusMessage[byte](AuthRejectType, sampleStatus, sampleMessage)
 	})
 	It("Type Should Be AuthRejectPacket", func() {
 		Expect(pkt.GetPacketType()).To(Equal(AuthRejectType))
 	})
 	It("Length Specifiers should carry correct values", func() {
-		Expect(int(pkt.msgLen)).To(Equal(len(sample_message)))
-		Expect(pkt.TotalLength()).To(Equal(2 + uint16(len(sample_message))))
+		Expect(int(pkt.msgLen)).To(Equal(len(sampleMessage)))
+		Expect(pkt.TotalLength()).To(Equal(2 + uint16(len(sampleMessage))))
 	})
 
 	It("Should Serialize correctly", func() {
 		bys := make([]byte, pkt.TotalLength())
 		Expect(pkt.WriteTo(bys)).To(BeNil())
-		Expect(bys[0]).To(Equal(byte(pkt.Status)))
-		Expect(bys[1]).To(Equal(byte(len(sample_message))))
+		Expect(bys[0]).To(Equal(pkt.Status))
+		Expect(bys[1]).To(Equal(byte(len(sampleMessage))))
 		Expect(string(bys[2 : 2+pkt.msgLen])).To(Equal(pkt.Message))
 	})
 

@@ -1,4 +1,4 @@
-package packets
+package servers_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestPackets(t *testing.T) {
+func TestServers(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Packets Suite")
+	RunSpecs(t, "Servers Suite")
 }

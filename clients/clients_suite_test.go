@@ -1,4 +1,4 @@
-package streams_test
+package clients_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestStreams(t *testing.T) {
+func TestClients(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Streams Suite")
+	RunSpecs(t, "Clients Suite")
 }

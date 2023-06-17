@@ -6,6 +6,8 @@ import (
 	"fmt"
 	mrand "math/rand"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type AuthRequestPacket struct {
@@ -15,28 +17,36 @@ type AuthRequestPacket struct {
 	HashedString       string
 }
 
-func generate_hashed_string(random_string, secret string) string {
-	combined := fmt.Sprintf("%s%s%s", random_string, secret, random_string)
+func generateHashedString(randomString, secret string) string {
+	combined := fmt.Sprintf("%s%s%s", randomString, secret, randomString)
 	hasher := md5.New()
 	hasher.Write([]byte(combined))
 	return string(hasher.Sum(nil))
 }
 
-func random_string(max_length int) string {
-	buf := make([]byte, max_length+1)
-	rand.Read(buf)
+func randomString(maxLength int) string {
+	buf := make([]byte, maxLength+1)
+	_, err := rand.Read(buf)
+	if err != nil {
+		logrus.Error("error in generating random string:", err)
+	}
 	return string(buf)
 }
 
 func NewAuhRequestPacket(secret string) AuthRequestPacket {
+	const (
+		maxRandomLength = 50
+		minRandomLength = 1
+	)
+
 	mrand.Seed(time.Now().Unix())
-	rnd_string := random_string(mrand.Intn(49) + 1)
-	hashed_string := generate_hashed_string(rnd_string, secret)
+	rndString := randomString(maxRandomLength + minRandomLength)
+	hashedString := generateHashedString(rndString, secret)
 	rtn := AuthRequestPacket{
-		randomStringLength: byte(len(rnd_string)),
-		hashedStringLength: byte(len(hashed_string)),
-		RandomString:       rnd_string,
-		HashedString:       hashed_string,
+		randomStringLength: byte(len(rndString)),
+		hashedStringLength: byte(len(hashedString)),
+		RandomString:       rndString,
+		HashedString:       hashedString,
 	}
 
 	return rtn
@@ -78,5 +88,5 @@ func (*AuthRequestPacket) GetPacketType() PacketType {
 }
 
 func (a *AuthRequestPacket) Authenticate(secret string) bool {
-	return generate_hashed_string(a.RandomString, secret) == a.HashedString
+	return generateHashedString(a.RandomString, secret) == a.HashedString
 }

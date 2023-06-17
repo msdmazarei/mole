@@ -6,8 +6,8 @@ import (
 )
 
 var _ = Describe("MoleContainerPacket", func() {
-	const sample_message = "sample_message"
-	const sample_status = 100
+	const sampleMessage = "sampleMessage"
+	const sampleStatus = 100
 	It("Type Should Be MoleContainerType", func() {
 		pkt := NewMoleContainerPacket(nil)
 		Expect(pkt.GetPacketType()).To(Equal(ContainerPacketType))
@@ -15,41 +15,41 @@ var _ = Describe("MoleContainerPacket", func() {
 	It("Length Specifiers should carry correct values", func() {
 		pkt := NewMoleContainerPacket(nil)
 		Expect(pkt.TotalLength()).To(Equal(uint16(3)))
-		ping_pkt := NewPingPacket(sample_message)
-		pkt = NewMoleContainerPacket(&ping_pkt)
-		Expect(pkt.TotalLength()).To(Equal(uint16(3 + ping_pkt.TotalLength())))
+		pingPkt := NewPingPacket(sampleMessage)
+		pkt = NewMoleContainerPacket(&pingPkt)
+		Expect(pkt.TotalLength()).To(Equal(3 + pingPkt.TotalLength()))
 	})
 
 	It("Should Serialize StatusMessages Correctly", func() {
-		auth_acc_pkt := NewAuthAcceptPacket(sample_status, sample_message)
-		pkt := NewMoleContainerPacket(&auth_acc_pkt)
-		pkt_buf := make([]byte, pkt.TotalLength())
-		auth_acc_buf := make([]byte, auth_acc_pkt.TotalLength())
-		Expect(auth_acc_pkt.WriteTo(auth_acc_buf)).To(BeNil())
-		Expect(pkt.WriteTo(pkt_buf)).To(BeNil())
-		Expect(pkt_buf[3:]).To(Equal(auth_acc_buf))
-		Expect(pkt_buf[2]).To(Equal(byte(auth_acc_pkt.GetPacketType())))
+		authAccPkt := NewAuthAcceptPacket(sampleStatus, sampleMessage)
+		pkt := NewMoleContainerPacket(&authAccPkt)
+		pktBuf := make([]byte, pkt.TotalLength())
+		authAccBuf := make([]byte, authAccPkt.TotalLength())
+		Expect(authAccPkt.WriteTo(authAccBuf)).To(BeNil())
+		Expect(pkt.WriteTo(pktBuf)).To(BeNil())
+		Expect(pktBuf[3:]).To(Equal(authAccBuf))
+		Expect(pktBuf[2]).To(Equal(byte(authAccPkt.GetPacketType())))
 	})
 	It("Should Serialize EncapsulateNetDevPacket Correctly", func() {
-		child_pkt := NewEncapsulateNetDevPacket([]byte{1, 2, 3, 4, 5, 6, 7})
-		pkt := NewMoleContainerPacket(&child_pkt)
-		pkt_buf := make([]byte, pkt.TotalLength())
-		child_buf := make([]byte, child_pkt.TotalLength())
-		Expect(child_pkt.WriteTo(child_buf)).To(BeNil())
-		Expect(pkt.WriteTo(pkt_buf)).To(BeNil())
-		Expect(pkt_buf[3:]).To(Equal(child_buf))
-		Expect(pkt_buf[2]).To(Equal(byte(child_pkt.GetPacketType())))
+		childPkt := NewEncapsulateNetDevPacket([]byte{1, 2, 3, 4, 5, 6, 7})
+		pkt := NewMoleContainerPacket(&childPkt)
+		pktBuf := make([]byte, pkt.TotalLength())
+		childBuf := make([]byte, childPkt.TotalLength())
+		Expect(childPkt.WriteTo(childBuf)).To(BeNil())
+		Expect(pkt.WriteTo(pktBuf)).To(BeNil())
+		Expect(pktBuf[3:]).To(Equal(childBuf))
+		Expect(pktBuf[2]).To(Equal(byte(childPkt.GetPacketType())))
 
 	})
 	It("Should Serialize ReportPacket Correctly", func() {
-		child_pkt := NewReportPacket(1, 2, 3, 4, 5)
-		pkt := NewMoleContainerPacket(&child_pkt)
-		pkt_buf := make([]byte, pkt.TotalLength())
-		child_buf := make([]byte, child_pkt.TotalLength())
-		Expect(child_pkt.WriteTo(child_buf)).To(BeNil())
-		Expect(pkt.WriteTo(pkt_buf)).To(BeNil())
-		Expect(pkt_buf[3:]).To(Equal(child_buf))
-		Expect(pkt_buf[2]).To(Equal(byte(child_pkt.GetPacketType())))
+		childPkt := NewReportPacket(1, 2, 3, 4, 5)
+		pkt := NewMoleContainerPacket(&childPkt)
+		pktBuf := make([]byte, pkt.TotalLength())
+		childBuf := make([]byte, childPkt.TotalLength())
+		Expect(childPkt.WriteTo(childBuf)).To(BeNil())
+		Expect(pkt.WriteTo(pktBuf)).To(BeNil())
+		Expect(pktBuf[3:]).To(Equal(childBuf))
+		Expect(pktBuf[2]).To(Equal(byte(childPkt.GetPacketType())))
 	})
 
 	It("From Bytes Should return error on invalid input", func() {
@@ -62,49 +62,49 @@ var _ = Describe("MoleContainerPacket", func() {
 	})
 
 	It("FromBytes Should Return Expected Result For StatusMessage", func() {
-		const sample_code = 100
-		const sample_msg = "sample_msg"
-		child_pkt := NewAuthAcceptPacket(sample_code, sample_msg)
-		pkt := NewMoleContainerPacket(&child_pkt)
-		pkt_buf := make([]byte, pkt.TotalLength())
-		pkt.WriteTo(pkt_buf)
+		const sampleCode = 100
+		const sampleMsg = "sampleMsg"
+		childPkt := NewAuthAcceptPacket(sampleCode, sampleMsg)
+		pkt := NewMoleContainerPacket(&childPkt)
+		pktBuf := make([]byte, pkt.TotalLength())
+		Expect(pkt.WriteTo(pktBuf)).To(BeNil())
 
-		deser_pkt := MoleContainerPacket{}
-		Expect(deser_pkt.FromBytes(pkt_buf)).To(BeNil())
-		Expect(deser_pkt.PacketType).To(Equal(child_pkt.GetPacketType()))
-		Expect(deser_pkt.MolePacket.TotalLength()).To(Equal(child_pkt.TotalLength()))
-		Expect(deser_pkt.MolePacket.(*AuthAcceptPacket).Status).To(Equal(child_pkt.Status))
-		Expect(deser_pkt.MolePacket.(*AuthAcceptPacket).Message).To(Equal(child_pkt.Message))
+		deserPkt := MoleContainerPacket{}
+		Expect(deserPkt.FromBytes(pktBuf)).To(BeNil())
+		Expect(deserPkt.PacketType).To(Equal(childPkt.GetPacketType()))
+		Expect(deserPkt.MolePacket.TotalLength()).To(Equal(childPkt.TotalLength()))
+		Expect(deserPkt.MolePacket.(*AuthAcceptPacket).Status).To(Equal(childPkt.Status))
+		Expect(deserPkt.MolePacket.(*AuthAcceptPacket).Message).To(Equal(childPkt.Message))
 	})
 
 	It("FromBytes Should Return Expected Result For EncapsulatedNetDevPacket", func() {
-		captured_buf := []byte{1, 2, 3, 4, 5, 6, 7}
-		child_pkt := NewEncapsulateNetDevPacket(captured_buf)
-		pkt := NewMoleContainerPacket(&child_pkt)
-		pkt_buf := make([]byte, pkt.TotalLength())
-		pkt.WriteTo(pkt_buf)
+		capturedBuf := []byte{1, 2, 3, 4, 5, 6, 7}
+		childPkt := NewEncapsulateNetDevPacket(capturedBuf)
+		pkt := NewMoleContainerPacket(&childPkt)
+		pktBuf := make([]byte, pkt.TotalLength())
+		Expect(pkt.WriteTo(pktBuf)).To(BeNil())
 
-		deser_pkt := MoleContainerPacket{}
-		Expect(deser_pkt.FromBytes(pkt_buf)).To(BeNil())
-		Expect(deser_pkt.PacketType).To(Equal(EncapsulatedNetDevPacketType))
-		Expect(deser_pkt.MolePacket.TotalLength()).To(Equal(uint16(len(captured_buf))))
+		deserPkt := MoleContainerPacket{}
+		Expect(deserPkt.FromBytes(pktBuf)).To(BeNil())
+		Expect(deserPkt.PacketType).To(Equal(EncapsulatedNetDevPacketType))
+		Expect(deserPkt.MolePacket.TotalLength()).To(Equal(uint16(len(capturedBuf))))
 
 	})
 
 	It("FromBytes Should Return Expected Result For ReportPacket", func() {
 
-		child_pkt := NewReportPacket(1, 2, 3, 4, 5)
-		pkt := NewMoleContainerPacket(&child_pkt)
-		pkt_buf := make([]byte, pkt.TotalLength())
-		pkt.WriteTo(pkt_buf)
+		childPkt := NewReportPacket(1, 2, 3, 4, 5)
+		pkt := NewMoleContainerPacket(&childPkt)
+		pktBuf := make([]byte, pkt.TotalLength())
+		Expect(pkt.WriteTo(pktBuf)).To(BeNil())
 
-		deser_pkt := MoleContainerPacket{}
-		Expect(deser_pkt.FromBytes(pkt_buf)).To(BeNil())
-		Expect(deser_pkt.PacketType).To(Equal(child_pkt.GetPacketType()))
-		Expect(deser_pkt.MolePacket.TotalLength()).To(Equal(child_pkt.TotalLength()))
-		Expect(deser_pkt.MolePacket.(*ReportPacket).SystemTime).To(Equal(uint64(1)))
-		Expect(deser_pkt.MolePacket.(*ReportPacket).SentPackets).To(Equal(uint64(2)))
-		Expect(deser_pkt.MolePacket.(*ReportPacket).RecvPackets).To(Equal(uint64(3)))
+		deserPkt := MoleContainerPacket{}
+		Expect(deserPkt.FromBytes(pktBuf)).To(BeNil())
+		Expect(deserPkt.PacketType).To(Equal(childPkt.GetPacketType()))
+		Expect(deserPkt.MolePacket.TotalLength()).To(Equal(childPkt.TotalLength()))
+		Expect(deserPkt.MolePacket.(*ReportPacket).SystemTime).To(Equal(uint64(1)))
+		Expect(deserPkt.MolePacket.(*ReportPacket).SentPackets).To(Equal(uint64(2)))
+		Expect(deserPkt.MolePacket.(*ReportPacket).RecvPackets).To(Equal(uint64(3)))
 	})
 
 })

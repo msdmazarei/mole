@@ -3,9 +3,9 @@ package packets
 type DisconnectCode byte
 
 const (
-	DisconnectTypeUnknwon DisconnectCode= iota
-	DisconnectTypeNormal  
-	DisconnectTypeError   
+	DisconnectTypeUnknwon DisconnectCode = iota
+	DisconnectTypeNormal
+	DisconnectTypeError
 )
 
 type DisconnectRequestPacket = StatusMessagePacket[DisconnectCode]

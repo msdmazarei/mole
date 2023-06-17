@@ -3,226 +3,199 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
+	"os/signal"
 	"time"
 
-	"github.com/msdmazarei/mole/streams"
+	"github.com/msdmazarei/mole/clients"
+	"github.com/msdmazarei/mole/servers"
+	"github.com/msdmazarei/mole/shared"
+	"github.com/sirupsen/logrus"
+
 	"github.com/songgao/water"
 )
 
-var (
-	ExitCodeBadArg = 1
+const (
+	exitCodeBadArg    = 1
+	defaultPortNumber = 3285
+	minSecretLength   = 5
+	defaultMTU        = 1500
 )
 
-type moleConfig struct {
-	opeation_mode string
-	address       net.IP
-	port          int
-	secret        string
-	proto         string
-	iface         *water.Interface
-}
+var (
+	giface             *water.Interface
+	onConnectScript    *string
+	onDisconnectScript *string
+	errChan            chan error
+)
+
+const (
+	clientRetryDelay    time.Duration = time.Second * 5
+	pingInterval                      = time.Second * 3
+	authTimeout                       = time.Second * 10
+	serverMaxConnection               = 10
+)
 
 func main() {
+	operationMode := flag.String(
+		"operation_mode",
+		"server",
+		"valid values are server or client")
 
-	operation_mode := flag.String("operation_mode", "server", "valid values are server or client")
-	address := flag.String("address", "0.0.0.0", "in server mode specifies ip address to listen on, and in client mode it specifies remote server address to connect")
-	port := flag.Int("port", 3285, "in server mode specifies listening port and in client mode specifies to server port to connect")
+	address := flag.String(
+		"address",
+		"0.0.0.0",
+		"in server mode specifies ip address to listen on, and in client mode it specifies remote server address to connect")
+
+	port := flag.Int("port",
+		defaultPortNumber,
+		"in server mode specifies listening port "+"and in client mode specifies to server port to connect")
 	proto := flag.String("proto", "udp", "valid values are udp and tcp")
 	secret := flag.String("secret", "secret", "secret value btw client and server")
-	net_dev := flag.String("net_dev", "", "specifies network device name - TAP device name")
+	onConnectScript = flag.String("onconnect", "", "script path to execute with device name once get connected")
+	onDisconnectScript = flag.String("ondisconnect", "", "script path to execute with device name once get disconnected")
 
 	flag.Parse()
-	if *operation_mode != "server" && *operation_mode != "client" {
-		fmt.Printf("opeation mode has wrong value\n")
-		os.Exit(ExitCodeBadArg)
+	if *operationMode != "server" && *operationMode != "client" {
+		logrus.Error("opeation mode has wrong value")
+		os.Exit(exitCodeBadArg)
 	}
-	address_ip := net.ParseIP(*address)
-	if address_ip == nil {
-		fmt.Printf("address has wrong value\n")
-		os.Exit(ExitCodeBadArg)
+	addressIP := net.ParseIP(*address)
+	if addressIP == nil {
+		logrus.Error("address has wrong value\n")
+		os.Exit(exitCodeBadArg)
 	}
 	if *port > 65535 || *port < 1 {
-		fmt.Print("port has wrong value")
-		os.Exit(ExitCodeBadArg)
+		logrus.Error("port has wrong value")
+		os.Exit(exitCodeBadArg)
 	}
-	if len(*secret) < 5 {
-		fmt.Print("secret is too short")
-		os.Exit(ExitCodeBadArg)
+	if len(*secret) < minSecretLength {
+		logrus.Error("secret is too short")
+		os.Exit(exitCodeBadArg)
 	}
-	if *net_dev == "" {
-		fmt.Print("net_dev should have a value")
-		os.Exit(ExitCodeBadArg)
-	}
+
 	if *proto != "udp" && *proto != "tcp" {
-		fmt.Print("proto has wrong value")
-		os.Exit(ExitCodeBadArg)
+		logrus.Error("proto has wrong value")
+		os.Exit(exitCodeBadArg)
 	}
-	cfg := water.Config{
-		DeviceType: water.TUN,
-		PlatformSpecificParams: water.PlatformSpecificParams{
-			Name: *net_dev,
+
+	errChan = make(chan error)
+	udpparams := shared.UDPParams{
+		GetTunDev: getTunDev,
+		OnFinish: func(err error) {
+			errChan <- err
 		},
+		OnRemovingClient: func(c string) {
+			logrus.Info("client is removed", c)
+		},
+		Address:     net.UDPAddr{IP: addressIP, Port: *port},
+		MTU:         defaultMTU,
+		AuthTimeout: authTimeout,
+		Secret:      *secret,
 	}
-	iface, err := water.New(cfg)
-	if err != nil {
-		fmt.Printf("error: %s\n", err.Error())
-		os.Exit(ExitCodeBadArg)
-	}
-	app_cfg := moleConfig{
-		opeation_mode: *operation_mode,
-		proto:         *proto,
-		address:       address_ip,
-		port:          *port,
-		iface:         iface,
-		secret:        *secret,
-	}
-
-	switch *operation_mode {
-	case "client":
-		runClientMode(app_cfg)
-	case "server":
-		runServerMode(app_cfg)
-	}
-
-}
-
-func runServerMode(cfg moleConfig) error {
-	var (
-		buf        [5000]byte
-		raddr      *net.UDPAddr = nil
-		udp_stream *UdpStreamer
-	)
-	err_chan := make(chan error, 1)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer func() {
-		fmt.Print("returning from runServerMode Function\n")
-		cancel()
+	udpAddress := net.UDPAddr{IP: addressIP, Port: *port}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for range c {
+			// sig is a ^C, handle it
+			logrus.Info("ctrl+c is captured, canceling running instance")
+			cancel()
+		}
 	}()
-	udpaddr := net.UDPAddr{
-		IP:   cfg.address,
-		Port: cfg.port,
-	}
-	udp_con, err := net.ListenUDP("udp", &udpaddr)
-	if err != nil {
-		panic(err)
-	}
 
-	for {
-		udp_con.SetReadDeadline(time.Now().Add(time.Millisecond))
-		n, recv_addr, err := udp_con.ReadFromUDP(buf[:])
-		if err != nil && err.(*net.OpError).Timeout() {
-			select {
-			case e := <-err_chan:
-				fmt.Printf("sever is dropped, because: %+v\n", e)
-				raddr = nil
-				udp_stream = nil
-				continue
-
-			default:
-				continue
-			}
-		}
+	switch *operationMode {
+	case "client":
+		conn, err := net.DialUDP("udp", nil, &udpAddress)
 		if err != nil {
-			fmt.Printf("exit from server cause of: %+v\n", err)
-			return err
+			logrus.Error("error in dialing udp remote address", err)
+			os.Exit(exitCodeBadArg)
 		}
+		udpparams.Conn = conn
+		clientPB := clients.UDPClientPB{
+			UDPParams:    udpparams,
+			PingInterval: pingInterval,
+		}
+		runClient(ctx, clientPB)
 
-		if raddr != nil && recv_addr.String() != raddr.String() {
-			fmt.Printf("ignore packet: raddr: %+v recv_arr: %+v\n", raddr, recv_addr)
-			//ignore received packet
-			continue
+	case "server":
+		runServer(ctx, udpAddress, udpparams)
+	}
+}
+func runServer(ctx context.Context, udpAddress net.UDPAddr, udpparams shared.UDPParams) {
+	for ctx.Err() == nil {
+		conn, err := net.ListenUDP("udp", &udpAddress)
+		if err != nil {
+			logrus.Error(err)
+			os.Exit(exitCodeBadArg)
 		}
-		if raddr == nil {
-			fmt.Printf("setup udp streamer\n")
-			raddr = recv_addr
-			udp_stream = NewUdpStreamer(udp_con, *recv_addr)
-			server_type := streams.MolePeerServer
-			mpb := streams.MolePeerPB{
-				NetDevIO:     cfg.iface,
-				NetworkIO:    udp_stream,
-				Secret:       cfg.secret,
-				Context:      ctx,
-				OnClose:      func(e error) { err_chan <- e },
-				MolePeerType: &server_type,
-			}
-			streams.NewMolePeer(mpb)
+		udpparams.Conn = conn
+		serverPB := servers.UDPServerPB{
+			UDPParams:     udpparams,
+			MaxConnection: serverMaxConnection,
+		}
+		servers.NewUDPServer(ctx, serverPB)
+	}
+}
+func runClient(ctx context.Context, clientPB clients.UDPClientPB) {
+	var err error
+	for ctx.Err() == nil {
+		_, err = clients.NewUDPClient(ctx, clientPB)
+		if err != nil {
+			logrus.Error("error in creating client:", err)
 		}
 		select {
-		case e := <-err_chan:
-			fmt.Printf("sever is dropped, because: %+v\n", e)
-			raddr = nil
-			udp_stream = nil
-
-		default:
-		}
-		if n > 0 && udp_stream != nil {
-			if buf[2] > 9 {
-				fmt.Printf("wrong buf!, %+v\n", buf)
-				panic("received wrong buffer")
+		case err = <-errChan:
+			if *onDisconnectScript != "" {
+				logrus.Info("executing on-disconnect script", *onDisconnectScript, " with arg ", giface.Name())
+				e := exec.Command(*onDisconnectScript, giface.Name()).Run()
+				if e != nil {
+					logrus.Error("failure on executing on-disconnect command", e)
+				}
 			}
-			udp_stream.SetRecvData(buf[:n])
+			logrus.Error("client exited caused of ", err)
+			logrus.Info("retry to reconnect again After 5 second")
+			<-time.After(clientRetryDelay)
+
+		case <-ctx.Done():
 		}
 	}
-
 }
-func runClientMode(cfg moleConfig) error {
-	client_err_chan := make(chan error, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	udpaddr := net.UDPAddr{
-		IP:   cfg.address,
-		Port: cfg.port,
+func getTunDev() (io.ReadWriteCloser, error) {
+	var (
+		err   error
+		iface *water.Interface
+	)
+	defer func() {
+		if err == nil && *onConnectScript != "" {
+			logrus.Info("running onConnectScript...", *onConnectScript, " with devname:", giface.Name())
+			err = exec.Command(*onConnectScript, giface.Name()).Run()
+			if err != nil {
+				logrus.Error("error in executing connect script", err)
+			}
+		}
+	}()
+	cfg := water.Config{
+		DeviceType: water.TUN,
 	}
-	udp_con, err := net.DialUDP("udp", nil, &udpaddr)
+	if giface != nil {
+		cfg.Name = giface.Name()
+	}
+	iface, err = water.New(cfg)
 	if err != nil {
-		panic(err)
+		if err.Error() == "ioctl: device or resource busy" {
+			logrus.Info("using tun dev", giface.Name())
+			return giface, nil
+		}
+		logrus.Error("error in getting tun dev:", err)
+		return nil, err
 	}
-	client_type := streams.MolePeerClient
-	mpb := streams.MolePeerPB{
-		NetDevIO:     cfg.iface,
-		NetworkIO:    udp_con,
-		Secret:       cfg.secret,
-		Context:      ctx,
-		OnClose:      func(e error) { client_err_chan <- e },
-		MolePeerType: &client_type,
-	}
-	streams.NewMolePeer(mpb)
-	e := <-client_err_chan
-	fmt.Printf("client is stopped cause of: %+\n", e)
-	return e
-}
-
-type UdpStreamer struct {
-	conn  *net.UDPConn
-	raddr net.UDPAddr
-	recv  chan []byte
-}
-
-func NewUdpStreamer(conn *net.UDPConn, raddr net.UDPAddr) *UdpStreamer {
-	return &UdpStreamer{
-		conn:  conn,
-		raddr: raddr,
-		recv:  make(chan []byte),
-	}
-}
-func (us *UdpStreamer) Write(buf []byte) (int, error) {
-	return us.conn.WriteToUDP(buf, &us.raddr)
-}
-func (us *UdpStreamer) Read(buf []byte) (n int, e error) {
-	r := <-us.recv
-	n = copy(buf, r)
-	return n, nil
-}
-func (us *UdpStreamer) SetRecvData(buf []byte) {
-	var b []byte = make([]byte,len(buf))
-	copy(b, buf)
-	select {
-	case us.recv <- b:
-	case <-time.After(time.Millisecond):
-		fmt.Printf("server timeouted in reading\n")
-	}
-
+	logrus.Info("successfully tun dev is create:", iface.Name())
+	giface = iface
+	return giface, nil
 }

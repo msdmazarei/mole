@@ -16,7 +16,7 @@ func (e *EncapsulatedNetDevPacket) WriteTo(buf []byte) error {
 	copy(buf, []byte(*e))
 	return nil
 }
-func (e *EncapsulatedNetDevPacket) FromBytes(buf []byte) error {
+func (e *EncapsulatedNetDevPacket) FromBytes([]byte) error {
 	return ErrNotImplemented
 }
 func (e *EncapsulatedNetDevPacket) TotalLength() uint16       { return uint16(len([]byte(*e))) }

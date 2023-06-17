@@ -7,35 +7,38 @@ import (
 
 const (
 	secret       = "secret"
-	wrong_secret = "wrong_secret"
+	wrongSecret = "wrongSecret"
 )
 
 var _ = Describe("AuthRequest", func() {
-	var auth_packet AuthRequestPacket
+	var authPacket AuthRequestPacket
 	BeforeEach(func() {
-		auth_packet = NewAuhRequestPacket(secret)
+		authPacket = NewAuhRequestPacket(secret)
 	})
 	It("Its Type Should Be AuthRequestType", func() {
-		Expect(auth_packet.GetPacketType()).To(Equal(AuthRequestType))
+		Expect(authPacket.GetPacketType()).To(Equal(AuthRequestType))
 	})
 	It("Length Specifiers should carry correct values", func() {
-		Expect(int(auth_packet.hashedStringLength)).To(Equal(len(auth_packet.HashedString)))
-		Expect(int(auth_packet.randomStringLength)).To(Equal(len(auth_packet.RandomString)))
-		Expect(auth_packet.TotalLength()).To(Equal(2 + uint16(auth_packet.hashedStringLength) + uint16(auth_packet.randomStringLength)))
+		Expect(int(authPacket.hashedStringLength)).To(Equal(len(authPacket.HashedString)))
+		Expect(int(authPacket.randomStringLength)).To(Equal(len(authPacket.RandomString)))
+		Expect(authPacket.TotalLength()).To(
+			Equal(2 +
+				uint16(authPacket.hashedStringLength) +
+				uint16(authPacket.randomStringLength)))
 	})
 
 	It("Authenticate Properly using passed secret", func() {
-		Expect(auth_packet.Authenticate(wrong_secret)).To(Equal(false))
-		Expect(auth_packet.Authenticate(secret)).To(Equal(true))
+		Expect(authPacket.Authenticate(wrongSecret)).To(Equal(false))
+		Expect(authPacket.Authenticate(secret)).To(Equal(true))
 	})
 
 	It("Should Serialize correctly", func() {
-		bys := make([]byte, auth_packet.TotalLength())
-		Expect(auth_packet.WriteTo(bys)).To(BeNil())
-		Expect(bys[0]).To(Equal(auth_packet.randomStringLength))
-		Expect(bys[1]).To(Equal(auth_packet.hashedStringLength))
-		Expect(string(bys[2 : 2+auth_packet.randomStringLength])).To(Equal(auth_packet.RandomString))
-		Expect(string(bys[2+auth_packet.randomStringLength:])).To(Equal(auth_packet.HashedString))
+		bys := make([]byte, authPacket.TotalLength())
+		Expect(authPacket.WriteTo(bys)).To(BeNil())
+		Expect(bys[0]).To(Equal(authPacket.randomStringLength))
+		Expect(bys[1]).To(Equal(authPacket.hashedStringLength))
+		Expect(string(bys[2 : 2+authPacket.randomStringLength])).To(Equal(authPacket.RandomString))
+		Expect(string(bys[2+authPacket.randomStringLength:])).To(Equal(authPacket.HashedString))
 	})
 
 	It("From Bytes Should return error on invalid input", func() {

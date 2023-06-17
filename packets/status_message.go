@@ -1,5 +1,9 @@
 package packets
 
+const (
+	statusPacketHeaderLen = 2
+)
+
 type StatusMessagePacket[S ~byte] struct {
 	Status     S
 	msgLen     byte
@@ -7,12 +11,12 @@ type StatusMessagePacket[S ~byte] struct {
 	packetType PacketType
 }
 
-func NewStatusMessage[S ~byte](pkt_type PacketType, code S, msg string) StatusMessagePacket[S] {
+func NewStatusMessage[S ~byte](pktType PacketType, code S, msg string) StatusMessagePacket[S] {
 	return StatusMessagePacket[S]{
 		Status:     code,
 		msgLen:     byte(len(msg)),
 		Message:    msg,
-		packetType: pkt_type,
+		packetType: pktType,
 	}
 }
 func (*StatusMessagePacket[S]) dedicatedFunctionForMolePackets() {}
@@ -22,24 +26,24 @@ func (a *StatusMessagePacket[S]) WriteTo(buf []byte) error {
 	}
 	buf[0] = byte(a.Status)
 	buf[1] = a.msgLen
-	copy(buf[2:], []byte(a.Message))
+	copy(buf[statusPacketHeaderLen:], []byte(a.Message))
 	return nil
 }
 func (a *StatusMessagePacket[S]) FromBytes(buf []byte) error {
 	l := len(buf)
-	if l < 2 {
+	if l < statusPacketHeaderLen {
 		return ErrTooShort
 	}
-	if l < 2+int(buf[1]) {
+	if l < statusPacketHeaderLen+int(buf[1]) {
 		return ErrTooShort
 	}
 	a.Status = S(buf[0])
 	a.msgLen = buf[1]
-	a.Message = string(buf[2 : 2+buf[1]])
+	a.Message = string(buf[statusPacketHeaderLen : statusPacketHeaderLen+buf[1]])
 	return nil
 }
 func (a *StatusMessagePacket[S]) TotalLength() uint16 {
-	return 2 + uint16(a.msgLen)
+	return statusPacketHeaderLen + uint16(a.msgLen)
 }
 
 func (a *StatusMessagePacket[S]) GetPacketType() PacketType {
