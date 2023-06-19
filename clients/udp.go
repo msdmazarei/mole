@@ -16,7 +16,9 @@ import (
 type (
 	UDPClientPB struct {
 		UDPParams
-		PingInterval time.Duration
+		Username, Secret string
+		NetDevProps      *TunDevProps
+		PingInterval     time.Duration
 	}
 	UDPClient struct {
 		ctx    context.Context
@@ -91,7 +93,7 @@ func (u *UDPClient) start() {
 	}
 
 	logrus.Info("authenticated")
-	netDev, err = u.GetTunDev()
+	netDev, err = u.GetTunDev(u.Username, u.NetDevProps)
 	if err != nil {
 		return
 	}
@@ -157,7 +159,7 @@ func (u *UDPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 	u.lastRecvPktTime = time.Now()
 	err = u.processPacket(netDev, &cpkt)
 	if err != nil {
-		logrus.Error("process packet error", err)
+		logrus.Error("process packet error", err, " netDev:", netDev)
 	}
 	return err
 }
@@ -351,7 +353,7 @@ func (u *UDPClient) authNetRead(i int, buf []byte) (int, error) {
 	return n, nil
 }
 func (u *UDPClient) sendAuthRequest() error {
-	auth := packets.NewAuhRequestPacket(u.Secret)
+	auth := packets.NewAuhRequestPacket(u.Username, u.Secret)
 	cpkt := packets.NewMoleContainerPacket(&auth)
 	buf := make([]byte, cpkt.TotalLength())
 	e := cpkt.WriteTo(buf)

@@ -13,8 +13,10 @@ import (
 type AuthRequestPacket struct {
 	randomStringLength byte
 	hashedStringLength byte
+	usernameLength     byte
 	RandomString       string
 	HashedString       string
+	Username           string
 }
 
 func generateHashedString(randomString, secret string) string {
@@ -33,7 +35,7 @@ func randomString(maxLength int) string {
 	return string(buf)
 }
 
-func NewAuhRequestPacket(secret string) AuthRequestPacket {
+func NewAuhRequestPacket(username, secret string) AuthRequestPacket {
 	const (
 		maxRandomLength = 50
 		minRandomLength = 1
@@ -45,8 +47,10 @@ func NewAuhRequestPacket(secret string) AuthRequestPacket {
 	rtn := AuthRequestPacket{
 		randomStringLength: byte(len(rndString)),
 		hashedStringLength: byte(len(hashedString)),
+		usernameLength:     byte(len(username)),
 		RandomString:       rndString,
 		HashedString:       hashedString,
+		Username:           username,
 	}
 
 	return rtn
@@ -58,29 +62,40 @@ func (a *AuthRequestPacket) WriteTo(buf []byte) error {
 	if uint16(len(buf)) < a.TotalLength() {
 		return ErrTooShort
 	}
-	buf[0] = a.randomStringLength
-	buf[1] = a.hashedStringLength
-	copy(buf[2:], []byte(a.RandomString))
-	copy(buf[2+buf[0]:], []byte(a.HashedString))
+	i := 0
+	buf[i] = a.randomStringLength
+	i++
+	buf[i] = a.hashedStringLength
+	i++
+	buf[i] = a.usernameLength
+	i++
+	copy(buf[i:], []byte(a.RandomString))
+	i += len(a.RandomString)
+	copy(buf[i:], []byte(a.HashedString))
+	i += len(a.HashedString)
+	copy(buf[i:], []byte(a.Username))
 	return nil
 }
 
 func (a *AuthRequestPacket) FromBytes(buf []byte) error {
 	l := len(buf)
-	if l < 4 || l < int(buf[0])+int(buf[1])+2 {
+	if l < 4 || l < int(buf[0])+int(buf[1])+int(buf[2])+3 {
 		return ErrTooShort
 	}
 	a.randomStringLength = buf[0]
 	a.hashedStringLength = buf[1]
-	i := 2
+	a.usernameLength = buf[2]
+	i := 3
 	a.RandomString = string(buf[i : i+int(a.randomStringLength)])
 	i += int(a.randomStringLength)
 	a.HashedString = string(buf[i : i+int(a.hashedStringLength)])
+	i += int(a.hashedStringLength)
+	a.Username = string(buf[i : i+int(a.usernameLength)])
 	return nil
 }
 
 func (a *AuthRequestPacket) TotalLength() uint16 {
-	return 2 + uint16(a.hashedStringLength) + uint16(a.randomStringLength)
+	return 3 + uint16(a.hashedStringLength) + uint16(a.randomStringLength) + uint16(a.usernameLength)
 }
 
 func (*AuthRequestPacket) GetPacketType() PacketType {

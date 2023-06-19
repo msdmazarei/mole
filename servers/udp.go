@@ -24,14 +24,19 @@ var (
 type (
 	UDPServerPB struct {
 		UDPParams
-		MaxConnection int
+		MaxConnection    int
+		Authenticate     func(packets.AuthRequestPacket) bool
+		OnRemovingClient func(
+			clientRemoteAddress string,
+			username string,
+			localDevNet io.ReadWriteCloser,
+			tunDev *TunDevProps)
 	}
 	UDPServer struct {
-		ctx               context.Context
-		cancel            context.CancelFunc
-		conn              UDPLikeConn
-		establishedClient string
-		lastZombieCheck   time.Time
+		ctx             context.Context
+		cancel          context.CancelFunc
+		conn            UDPLikeConn
+		lastZombieCheck time.Time
 
 		UDPServerPB
 	}
@@ -45,6 +50,8 @@ type (
 		remoteReport       packets.ReportPacket
 		localReport        packets.ReportPacket
 		lastSent, lastRecv time.Time
+		authPkt            packets.AuthRequestPacket
+		tunDevProps        *TunDevProps
 	}
 )
 
@@ -227,29 +234,28 @@ func (u *UDPServer) processPacket(
 	}
 	state := usc.fsm.Current()
 	if state == StateDisconnected {
-		if sAddr == u.establishedClient {
-			u.establishedClient = ""
-			if usc.localNetDev != nil {
-				usc.localNetDev.Close()
-			}
+		if usc.localNetDev != nil {
+			usc.localNetDev.Close()
 		}
 		// remove from clients
 		u.removeClient(clients, raddr.String())
-	} else if state == StateAuthenticated {
-		u.establishedClient = sAddr
 	}
-
 	return err
 }
 func (u *UDPServer) removeClient(clients map[string]*udpServerClient, s string) {
+	var disconnectState = []string{StateDisconnecting, StateDisconnected}
 	logrus.Info("removing client from clients list", "client", s)
 	if u.OnRemovingClient != nil {
-		u.OnRemovingClient(s)
+		if Contains(disconnectState, clients[s].fsm.Current()) {
+			usc := clients[s]
+			logrus.Info("calling client disconnect for username:", usc.authPkt.Username)
+
+			u.OnRemovingClient(s, usc.authPkt.Username, usc.localNetDev, usc.tunDevProps)
+		} else {
+			u.OnRemovingClient(s, "", nil, nil)
+		}
 	}
 	delete(clients, s)
-	if s == u.establishedClient {
-		u.establishedClient = ""
-	}
 }
 func (u *UDPServer) newUDPServerClient(r *net.UDPAddr) *udpServerClient {
 	return &udpServerClient{
@@ -381,9 +387,11 @@ func (usc *udpServerClient) processDisconnect(currentState string) error {
 	}
 	return nil
 }
-func (usc *udpServerClient) onSuccessAuthentication() error {
+func (usc *udpServerClient) onSuccessAuthentication(authReq packets.AuthRequestPacket) error {
 	var err error
-	usc.localNetDev, err = usc.server.GetTunDev()
+	usc.tunDevProps = nil // ToDo: maybe in future we decide to add some fw rules for this connection
+	usc.authPkt = authReq
+	usc.localNetDev, err = usc.server.GetTunDev(authReq.Username, usc.tunDevProps)
 	if err != nil {
 		return err
 	}
@@ -411,7 +419,7 @@ func (usc *udpServerClient) authenticating(pkt *packets.MoleContainerPacket) err
 		return nil
 	}
 	authPkt, _ = pkt.MolePacket.(*packets.AuthRequestPacket)
-	if !authPkt.Authenticate(usc.server.Secret) {
+	if !usc.server.Authenticate(*authPkt) {
 		err = usc.event(EventInternalInvalidSecret)
 		_ = usc.sendAuthRejectedPacket()
 		_ = usc.sendDisconnectRequest()
@@ -425,7 +433,7 @@ func (usc *udpServerClient) authenticating(pkt *packets.MoleContainerPacket) err
 		return err
 	}
 
-	err = usc.onSuccessAuthentication()
+	err = usc.onSuccessAuthentication(*authPkt)
 	if err != nil {
 		logrus.Error("on launching client requirements", err)
 		return err

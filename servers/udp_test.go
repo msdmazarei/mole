@@ -21,8 +21,8 @@ func testToBytes(inp packets.MolePacketer) []byte {
 	return buf
 }
 
-func testAuthReqMsg(secret string) []byte {
-	authReq := packets.NewAuhRequestPacket(secret)
+func testAuthReqMsg(username, secret string) []byte {
+	authReq := packets.NewAuhRequestPacket(username, secret)
 	return testToBytes(&authReq)
 }
 
@@ -47,16 +47,17 @@ var _ = Describe("UDP", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 		}
-		getTunDev = func() (io.ReadWriteCloser, error) {
+		getTunDev = func(string, *TunDevProps) (io.ReadWriteCloser, error) {
 			devSystemSide, devProcessSide = net.Pipe()
 			return devProcessSide, nil
 		}
 		MTU              = 1000
 		secret           = "masoudisgoodboy"
+		username         = "msd"
 		client           net.Conn
 		fakeUDPConn      *FakeUDP
 		AuthTimeout      = time.Second
-		onRemovingClient = func(c string) {}
+		onRemovingClient = func(c string, username string, d io.ReadWriteCloser, t *TunDevProps) {}
 
 		newUDPServer = func() UDPServer {
 			fakeUDPConn, _ = NewFakeUDP(ServerSide)
@@ -64,15 +65,17 @@ var _ = Describe("UDP", func() {
 
 			udppb := UDPServerPB{
 				MaxConnection: 10,
-				UDPParams: UDPParams{
-					GetTunDev:        getTunDev,
-					OnFinish:         onFinish,
-					Conn:             fakeUDPConn,
-					MTU:              uint16(MTU),
-					AuthTimeout:      AuthTimeout,
-					OnRemovingClient: onRemovingClient,
-					Secret:           secret,
+				Authenticate: func(authPkt packets.AuthRequestPacket) bool {
+					return authPkt.Username == username && authPkt.Authenticate(secret)
 				},
+				UDPParams: UDPParams{
+					GetTunDev:   getTunDev,
+					OnFinish:    onFinish,
+					Conn:        fakeUDPConn,
+					MTU:         uint16(MTU),
+					AuthTimeout: AuthTimeout,
+				},
+				OnRemovingClient: onRemovingClient,
 			}
 
 			return NewUDPServer(ctx, udppb)
@@ -85,7 +88,7 @@ var _ = Describe("UDP", func() {
 		BeforeEach(func() {
 			ctx, cancel = context.WithCancel(context.Background())
 
-			onRemovingClient = func(c string) {
+			onRemovingClient = func(c string, u string, d io.ReadWriteCloser, t *TunDevProps) {
 				removedClient = c
 				Expect(c).NotTo(Equal(""))
 			}
@@ -125,12 +128,12 @@ var _ = Describe("UDP", func() {
 			fakeUDPConn.Close()
 		})
 		It("reject client when it sends wrong secret", func() {
-			buf := testAuthReqMsg(secret + ":")
+			buf := testAuthReqMsg(username, secret+":")
 			_, _ = client.Write(buf)
 			expectedPacketType = packets.AuthRejectType
 		})
 		It("accept client when it send correct secret", func() {
-			buf := testAuthReqMsg(secret)
+			buf := testAuthReqMsg(username, secret)
 			_, _ = client.Write(buf)
 			expectedPacketType = packets.AuthAcceptType
 		})
@@ -148,11 +151,11 @@ var _ = Describe("UDP", func() {
 		BeforeEach(func() {
 			ctx, cancel = context.WithCancel(context.Background())
 			clientIsRemoved = false
-			onRemovingClient = func(string) {
+			onRemovingClient = func(string, string, io.ReadWriteCloser, *TunDevProps) {
 				clientIsRemoved = true
 			}
 			newUDPServer()
-			buf := testAuthReqMsg(secret)
+			buf := testAuthReqMsg(username, secret)
 			_, err = client.Write(buf)
 			Expect(err).NotTo(HaveOccurred())
 			_, err = client.Read(readBuf[:])

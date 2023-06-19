@@ -23,7 +23,6 @@ var _ = Describe("Clients", func() {
 		err      error
 		server   net.Conn
 		fakeUDP  *FakeUDP
-		secret   = "secret"
 		chErr    chan error
 		onFinish = func(e error) {
 			select {
@@ -48,10 +47,9 @@ var _ = Describe("Clients", func() {
 				UDPParams: UDPParams{
 					Address:     net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3285},
 					AuthTimeout: time.Second,
-					Secret:      secret,
 					Conn:        fakeUDP,
 					OnFinish:    onFinish,
-					GetTunDev: func() (io.ReadWriteCloser, error) {
+					GetTunDev: func(string, *TunDevProps) (io.ReadWriteCloser, error) {
 						_, processDevSide = net.Pipe()
 						return processDevSide, nil
 					},
@@ -118,11 +116,10 @@ var _ = Describe("Clients", func() {
 				UDPParams: UDPParams{
 					Address:     net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3285},
 					AuthTimeout: time.Second * 5,
-					Secret:      secret,
 					Conn:        fakeUDP,
 					OnFinish:    onFinish,
 
-					GetTunDev: func() (io.ReadWriteCloser, error) {
+					GetTunDev: func(string, *TunDevProps) (io.ReadWriteCloser, error) {
 						sysDevSide, processDevSide = net.Pipe()
 						return processDevSide, nil
 					},

@@ -15,7 +15,7 @@ type MoleContainerPacket struct {
 
 const (
 	containerPacketHeaderLen = 3
-	indexOfPktType = 2
+	indexOfPktType           = 2
 )
 
 func NewMoleContainerPacket(molePacket MolePacketer) MoleContainerPacket {

@@ -8,6 +8,8 @@ import (
 )
 
 type (
+	TunDevProps struct {
+	}
 	UDPLikeConn interface {
 		io.ReadWriter
 		Close() error
@@ -16,14 +18,13 @@ type (
 		ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error)
 		WriteToUDP(b []byte, addr *net.UDPAddr) (int, error)
 	}
+
 	UDPParams struct {
-		GetTunDev        func() (io.ReadWriteCloser, error)
-		OnFinish         context.CancelCauseFunc
-		OnRemovingClient func(clientAddress string)
-		Address          net.UDPAddr
-		Conn             UDPLikeConn
-		MTU              uint16
-		AuthTimeout      time.Duration
-		Secret           string
+		GetTunDev   func(username string, tunDevProps *TunDevProps) (io.ReadWriteCloser, error)
+		OnFinish    context.CancelCauseFunc
+		Address     net.UDPAddr
+		Conn        UDPLikeConn
+		MTU         uint16
+		AuthTimeout time.Duration
 	}
 )

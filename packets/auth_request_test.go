@@ -6,14 +6,15 @@ import (
 )
 
 const (
-	secret       = "secret"
+	username    = "username"
+	secret      = "secret"
 	wrongSecret = "wrongSecret"
 )
 
 var _ = Describe("AuthRequest", func() {
 	var authPacket AuthRequestPacket
 	BeforeEach(func() {
-		authPacket = NewAuhRequestPacket(secret)
+		authPacket = NewAuhRequestPacket(username, secret)
 	})
 	It("Its Type Should Be AuthRequestType", func() {
 		Expect(authPacket.GetPacketType()).To(Equal(AuthRequestType))
@@ -21,10 +22,13 @@ var _ = Describe("AuthRequest", func() {
 	It("Length Specifiers should carry correct values", func() {
 		Expect(int(authPacket.hashedStringLength)).To(Equal(len(authPacket.HashedString)))
 		Expect(int(authPacket.randomStringLength)).To(Equal(len(authPacket.RandomString)))
+		Expect(int(authPacket.usernameLength)).To(Equal(len(authPacket.Username)))
 		Expect(authPacket.TotalLength()).To(
-			Equal(2 +
+			Equal(3 +
 				uint16(authPacket.hashedStringLength) +
-				uint16(authPacket.randomStringLength)))
+				uint16(authPacket.randomStringLength) +
+				uint16(authPacket.usernameLength)),
+		)
 	})
 
 	It("Authenticate Properly using passed secret", func() {
@@ -37,8 +41,13 @@ var _ = Describe("AuthRequest", func() {
 		Expect(authPacket.WriteTo(bys)).To(BeNil())
 		Expect(bys[0]).To(Equal(authPacket.randomStringLength))
 		Expect(bys[1]).To(Equal(authPacket.hashedStringLength))
-		Expect(string(bys[2 : 2+authPacket.randomStringLength])).To(Equal(authPacket.RandomString))
-		Expect(string(bys[2+authPacket.randomStringLength:])).To(Equal(authPacket.HashedString))
+		Expect(bys[2]).To(Equal(authPacket.usernameLength))
+		i := 3
+		Expect(string(bys[i : i+int(authPacket.randomStringLength)])).To(Equal(authPacket.RandomString))
+		i += int(authPacket.randomStringLength)
+		Expect(string(bys[i : i+int(authPacket.hashedStringLength)])).To(Equal(authPacket.HashedString))
+		i += int(authPacket.hashedStringLength)
+		Expect(string(bys[i : i+int(authPacket.usernameLength)])).To(Equal(authPacket.Username))
 	})
 
 	It("From Bytes Should return error on invalid input", func() {
@@ -50,11 +59,13 @@ var _ = Describe("AuthRequest", func() {
 
 	It("FromBytes Should Return Expected Result", func() {
 		a := AuthRequestPacket{}
-		Expect(a.FromBytes([]byte{1, 1, 'A', 'B'})).To(BeNil())
+		Expect(a.FromBytes([]byte{1, 1, 1, 'A', 'B', 'C'})).To(BeNil())
 		Expect(a.hashedStringLength).To(Equal(byte(1)))
 		Expect(a.randomStringLength).To(Equal(byte(1)))
+		Expect(a.usernameLength).To(Equal(byte(1)))
 		Expect(a.RandomString).To(Equal("A"))
 		Expect(a.HashedString).To(Equal("B"))
+		Expect(a.Username).To(Equal("C"))
 
 	})
 
