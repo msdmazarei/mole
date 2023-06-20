@@ -197,7 +197,6 @@ func (u *UDPClient) processPacket(netDev io.Writer, cpkt *packets.MoleContainerP
 	case packets.EncapsulatedNetDevPacketType:
 		encap, _ := cpkt.MolePacket.(*packets.EncapsulatedNetDevPacket)
 		_, err = encap.WriteContentTo(netDev)
-		logrus.Info("writing encap to netDev, err", err)
 		return err
 	case packets.DisconnectRequestType:
 		err = u.sendDisAcceptedPkt()
