@@ -3,14 +3,15 @@ package servers
 import (
 	"context"
 	"errors"
-	"github.com/looplab/fsm"
-	"github.com/msdmazarei/mole/packets"
-	. "github.com/msdmazarei/mole/shared"
-	"github.com/sirupsen/logrus"
 	"io"
 	"math/rand"
 	"net"
 	"time"
+
+	"github.com/looplab/fsm"
+	"github.com/msdmazarei/mole/packets"
+	. "github.com/msdmazarei/mole/shared"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -249,7 +250,6 @@ func (u *UDPServer) removeClient(clients map[string]*udpServerClient, s string) 
 		if Contains(disconnectState, clients[s].fsm.Current()) {
 			usc := clients[s]
 			logrus.Info("calling client disconnect for username:", usc.authPkt.Username)
-
 			u.OnRemovingClient(s, usc.authPkt.Username, usc.localNetDev, usc.tunDevProps)
 		} else {
 			u.OnRemovingClient(s, "", nil, nil)
@@ -258,12 +258,13 @@ func (u *UDPServer) removeClient(clients map[string]*udpServerClient, s string) 
 	delete(clients, s)
 }
 func (u *UDPServer) newUDPServerClient(r *net.UDPAddr) *udpServerClient {
-	return &udpServerClient{
+	rtn := &udpServerClient{
 		server:        u,
 		rAddr:         *r,
 		fsm:           fsm.NewFSM(StateConnected, ServerFsmEvents, fsm.Callbacks{}),
 		connectedTime: time.Now(),
 	}
+	return rtn
 }
 func (u *UDPServer) checkIfContextIsDone(t time.Time) (bool, time.Time) {
 	if time.Since(t) > ContextDoneStatusInterval {
@@ -462,6 +463,8 @@ func (usc *udpServerClient) pipeLocalPacketsToRemote() {
 		molePacket  packets.MoleContainerPacket
 		encapPacket packets.EncapsulatedNetDevPacket
 	)
+	defer logrus.Info("exit from piping local to remote", usc.rAddr)
+	logrus.Info("start piping local dev net to ", usc.rAddr)
 	for {
 		if usc.localNetDev == nil {
 			return

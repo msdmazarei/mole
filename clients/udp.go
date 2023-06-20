@@ -149,7 +149,6 @@ func (u *UDPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 	if n == 0 {
 		return nil
 	}
-
 	err = cpkt.FromBytes(buf[:n])
 	if err != nil {
 		//nolint:nilerr // bad packet format, ignore it
@@ -198,6 +197,7 @@ func (u *UDPClient) processPacket(netDev io.Writer, cpkt *packets.MoleContainerP
 	case packets.EncapsulatedNetDevPacketType:
 		encap, _ := cpkt.MolePacket.(*packets.EncapsulatedNetDevPacket)
 		_, err = encap.WriteContentTo(netDev)
+		logrus.Info("writing encap to netDev, err", err)
 		return err
 	case packets.DisconnectRequestType:
 		err = u.sendDisAcceptedPkt()
@@ -248,6 +248,7 @@ func (u *UDPClient) captureLocalDev(netDev io.Reader) {
 	)
 	defer logrus.Info("exiting from capture local dev", err)
 	defer u.cancel()
+	logrus.Info("start piping netdev packet to udp connection")
 	for u.checkContext() == nil {
 		n, err = netDev.Read(buf)
 		if err != nil {
@@ -301,6 +302,9 @@ func (u *UDPClient) authenticate() error {
 		if err != nil {
 			return err
 		}
+		if n == 0 {
+			continue
+		}
 
 		if cpkt.FromBytes(buf[:n]) != nil {
 			// wrong packet is received.
@@ -331,9 +335,10 @@ func (u *UDPClient) authenticate() error {
 }
 func (u *UDPClient) authNetRead(i int, buf []byte) (int, error) {
 	var (
-		err  error
-		n    int
-		conn = u.Conn
+		err    error
+		n      int
+		netErr net.Error
+		conn   = u.Conn
 	)
 
 	err = conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100 * time.Duration(i)))
@@ -344,6 +349,9 @@ func (u *UDPClient) authNetRead(i int, buf []byte) (int, error) {
 
 	n, err = conn.Read(buf)
 	if errors.Is(err, context.DeadlineExceeded) {
+		return 0, nil
+	}
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		return 0, nil
 	}
 

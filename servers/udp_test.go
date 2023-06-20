@@ -88,7 +88,7 @@ var _ = Describe("UDP", func() {
 		BeforeEach(func() {
 			ctx, cancel = context.WithCancel(context.Background())
 
-			onRemovingClient = func(c string, u string, d io.ReadWriteCloser, t *TunDevProps) {
+			onRemovingClient = func(c string, _ string, _ io.ReadWriteCloser, t *TunDevProps) {
 				removedClient = c
 				Expect(c).NotTo(Equal(""))
 			}

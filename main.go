@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -197,7 +198,7 @@ func runClient(ctx context.Context, clientPB clients.UDPClientPB) {
 		}
 		select {
 		case err = <-errChan:
-			if appCfg.onDisconnectScript != "" {
+			if appCfg.onDisconnectScript != "" && giface != nil {
 				logrus.Info("executing on-disconnect script", appCfg.onDisconnectScript, " with arg ", giface.Name())
 				e := exec.Command(appCfg.onDisconnectScript, giface.Name()).Run()
 				if e != nil {
@@ -246,15 +247,18 @@ func getTunDev(string, *shared.TunDevProps) (io.ReadWriteCloser, error) {
 	return giface, nil
 }
 
-func srvRemoveClient(clientRemoteAddress string,
+func srvRemoveClient(_ string,
 	username string,
 	localDevNet io.ReadWriteCloser,
 	_ *shared.TunDevProps) {
 	iface, ok := localDevNet.(*water.Interface)
+
 	if !ok {
 		logrus.Error("removing client is getting invalid tun device, its not water.interface")
 		return
 	}
+	// need to do it using lock but its ok for now
+	delete(srvDevList, iface.Name())
 	if appCfg.onDisconnectScript != "" {
 		logrus.Info(
 			"running onDisconnectScript...", appCfg.onDisconnectScript,
@@ -269,12 +273,15 @@ func srvRemoveClient(clientRemoteAddress string,
 		}()
 	}
 }
+
+var tundevcounter int
+
 func getTunDevServer(username string, _ *shared.TunDevProps) (io.ReadWriteCloser, error) {
 	var (
 		err   error
-		exist bool
 		cfg   water.Config
 		iface *water.Interface
+		exist bool
 	)
 	defer func() {
 		if err == nil && appCfg.onConnectScript != "" {
@@ -289,27 +296,23 @@ func getTunDevServer(username string, _ *shared.TunDevProps) (io.ReadWriteCloser
 		}
 	}()
 	iface, exist = srvDevList[username]
+	if exist && iface != nil {
+		// make piping process exit and running connection to be disconnetd
+		iface.Close()
+	}
+	tundevcounter++
 	cfg = water.Config{
 		DeviceType: water.TUN,
 	}
-	if exist {
-		cfg.Name = iface.Name()
-		_, err = water.New(cfg)
-		if err != nil && err.Error() != "ioctl: device or resource busy" {
-			logrus.Error("error in getting tun dev:", err)
-			return nil, err
-		}
-		err = nil
-	} else {
-		iface, err = water.New(cfg)
-		if err != nil {
-			logrus.Error("in creation tun dev", " err:", err)
-			return nil, err
-		}
+	cfg.Name = fmt.Sprintf("tun%d", tundevcounter)
+
+	iface, err = water.New(cfg)
+	if err != nil {
+		logrus.Error("in creation tun dev", " err:", err)
+		return nil, err
 	}
 
 	logrus.Info("successfully tun dev is:", iface.Name())
 	srvDevList[username] = iface
-
 	return iface, nil
 }
