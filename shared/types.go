@@ -27,4 +27,13 @@ type (
 		MTU         uint16
 		AuthTimeout time.Duration
 	}
+	TCPParams struct {
+		GetTunDev   func(username string, tunDevProps *TunDevProps) (io.ReadWriteCloser, error)
+		OnFinish    context.CancelCauseFunc
+		Address     net.TCPAddr
+		Listener net.Listener
+		Conn net.Conn
+		MTU         uint16
+		AuthTimeout time.Duration
+	}
 )

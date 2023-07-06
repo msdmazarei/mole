@@ -120,6 +120,10 @@ func parseArgs() cfg {
 	return rtn
 }
 func main() {
+	var (
+		listener net.Listener
+		err      error
+	)
 	appCfg = parseArgs()
 	errChan = make(chan error)
 	udpparams := shared.UDPParams{
@@ -128,6 +132,15 @@ func main() {
 			errChan <- err
 		},
 		Address:     net.UDPAddr{IP: appCfg.address, Port: appCfg.port},
+		MTU:         defaultMTU,
+		AuthTimeout: authTimeout,
+	}
+	tcpparams := shared.TCPParams{
+		GetTunDev: getTunDevServer,
+		OnFinish: func(err error) {
+			errChan <- err
+		},
+		Address:     net.TCPAddr{IP: appCfg.address, Port: appCfg.port},
 		MTU:         defaultMTU,
 		AuthTimeout: authTimeout,
 	}
@@ -141,37 +154,76 @@ func main() {
 			// sig is a ^C, handle it
 			logrus.Info("ctrl+c is captured, canceling running instance")
 			cancel()
+			// close listener
+			if appCfg.proto == "tcp" {
+				listener.Close()
+			}
 		}
 	}()
 
 	switch appCfg.operationMode {
 	case clientMode:
-		conn, err := net.DialUDP("udp", nil, &udpAddress)
-		if err != nil {
-			logrus.Error("error in dialing udp remote address", err)
-			os.Exit(exitCodeBadArg)
+		switch appCfg.proto {
+		case "udp":
+			conn, err := net.DialUDP("udp", nil, &udpAddress)
+			if err != nil {
+				logrus.Error("error in dialing udp remote address", err)
+				os.Exit(exitCodeBadArg)
+			}
+			udpparams.Conn = conn
+			clientPB := clients.UDPClientPB{
+				UDPParams:    udpparams,
+				PingInterval: pingInterval,
+				Secret:       appCfg.secret,
+				Username:     appCfg.username,
+			}
+			runClient(ctx, clientPB)
+
+		case "tcp":
+			clientPB := clients.TCPClientPB{
+				TCPParams:    tcpparams,
+				PingInterval: pingInterval,
+				Secret:       appCfg.secret,
+				Username:     appCfg.username,
+			}
+			runTCPClient(ctx, clientPB)
 		}
-		udpparams.Conn = conn
-		clientPB := clients.UDPClientPB{
-			UDPParams:    udpparams,
-			PingInterval: pingInterval,
-			Secret:       appCfg.secret,
-			Username:     appCfg.username,
-		}
-		runClient(ctx, clientPB)
 
 	case serverMode:
-		serverPB := servers.UDPServerPB{
-			UDPParams:        udpparams,
-			MaxConnection:    serverMaxConnection,
-			OnRemovingClient: srvRemoveClient,
-			Authenticate: func(authPkt packets.AuthRequestPacket) bool {
-				return authPkt.Username == appCfg.username && authPkt.Authenticate(appCfg.secret)
-			},
-		}
-		serverPB.GetTunDev = getTunDevServer
+		switch appCfg.proto {
+		case "udp":
 
-		runServer(ctx, udpAddress, serverPB)
+			serverPB := servers.UDPServerPB{
+				UDPParams:        udpparams,
+				MaxConnection:    serverMaxConnection,
+				OnRemovingClient: srvRemoveClient,
+				Authenticate: func(authPkt packets.AuthRequestPacket) bool {
+					return authPkt.Username == appCfg.username && authPkt.Authenticate(appCfg.secret)
+				},
+			}
+			serverPB.GetTunDev = getTunDevServer
+
+			runServer(ctx, udpAddress, serverPB)
+		case "tcp":
+			listener, err = net.ListenTCP("tcp", &net.TCPAddr{IP: appCfg.address, Port: appCfg.port})
+			if err != nil {
+				logrus.Error("error in listening tcp", err)
+				os.Exit(exitCodeBadArg)
+			}
+
+			serverPB := servers.TCPServerPB{
+				TCPParams:        tcpparams,
+				MaxConnection:    serverMaxConnection,
+				OnRemovingClient: srvRemoveClient,
+				Authenticate: func(authPkt packets.AuthRequestPacket) bool {
+					return authPkt.Username == appCfg.username && authPkt.Authenticate(appCfg.secret)
+				},
+			}
+			serverPB.GetTunDev = getTunDevServer
+			serverPB.Listener = listener
+			runTCPServer(ctx, net.TCPAddr{IP: appCfg.address, Port: appCfg.port}, serverPB)
+		}
+
 	}
 }
 func runServer(ctx context.Context, udpAddress net.UDPAddr, serverPB servers.UDPServerPB) {
@@ -189,10 +241,50 @@ func runServer(ctx context.Context, udpAddress net.UDPAddr, serverPB servers.UDP
 		}
 	}
 }
+func runTCPServer(ctx context.Context, udpAddress net.TCPAddr, serverPB servers.TCPServerPB) {
+	var err error
+	serverPB.Conn = nil
+	for ctx.Err() == nil {
+		servers.NewTCPServer(ctx, serverPB)
+		err = <-errChan
+		if err != nil {
+			logrus.Error("server tcp exited cause of ", err)
+		}
+	}
+}
 func runClient(ctx context.Context, clientPB clients.UDPClientPB) {
 	var err error
 	for ctx.Err() == nil {
 		_, err = clients.NewUDPClient(ctx, clientPB)
+		if err != nil {
+			logrus.Error("error in creating client:", err)
+		}
+		select {
+		case err = <-errChan:
+			if appCfg.onDisconnectScript != "" && giface != nil {
+				logrus.Info("executing on-disconnect script", appCfg.onDisconnectScript, " with arg ", giface.Name())
+				e := exec.Command(appCfg.onDisconnectScript, giface.Name()).Run()
+				if e != nil {
+					logrus.Error("failure on executing on-disconnect command", e)
+				}
+			}
+			logrus.Error("client exited caused of ", err)
+			logrus.Info("retry to reconnect again After 5 second")
+			<-time.After(clientRetryDelay)
+
+		case <-ctx.Done():
+		}
+	}
+}
+func runTCPClient(ctx context.Context, clientPB clients.TCPClientPB) {
+	for ctx.Err() == nil {
+		conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: appCfg.address, Port: appCfg.port})
+		if err != nil {
+			logrus.Error("error in dialing udp remote address", err)
+			os.Exit(exitCodeBadArg)
+		}
+		clientPB.Conn = conn
+		_, err = clients.NewTCPClient(ctx, clientPB)
 		if err != nil {
 			logrus.Error("error in creating client:", err)
 		}
