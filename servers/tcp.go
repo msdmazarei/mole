@@ -409,6 +409,11 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 		n      uint16
 		m      int
 	)
+	defer func(){
+		if err!=nil {
+			logrus.Warn("closing cause of : ", err)
+		}
+	}()
 	err = tsc.conn.SetReadDeadline(time.Now().Add(time.Millisecond))
 	if err != nil {
 		return nil, err
@@ -418,6 +423,7 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 
 	if err != nil {
 		if errors.As(err, &errNet) && errNet.Timeout() {
+			err = nil
 			return nil, nil
 		}
 		return nil, err
@@ -427,7 +433,8 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 	if n > uint16(len(buf)) {
 		logrus.Warn("bad serialized packet, with len: ", n, " closing connection")
 		tsc.conn.Close()
-		return nil, io.ErrShortBuffer
+		err = io.ErrShortBuffer 
+		return nil, err
 	}
 	// keep receiving until total packet arrive
 	readBytes := uint16(3)
