@@ -125,12 +125,18 @@ func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 		m      int
 		buf    = make([]byte, t.MTU+extraBufferBytes)
 	)
+	defer func(){
+		if err!=nil {
+			logrus.Warn("closing connection cause of :", err)
+		}
+
+	}()
 	err = t.Conn.SetReadDeadline(time.Now().Add(time.Millisecond))
 	if err != nil {
 		return err
 	}
-	m, err = t.Conn.Read(buf[:3])
-	if m == 0 && err != nil {
+	_, err = t.Conn.Read(buf[:3])
+	if err != nil {
 		if !errors.As(err, &netErr) {
 			return err
 		}
@@ -138,7 +144,8 @@ func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 			logrus.Error("read error", err)
 			return err
 		} else {
-			return nil
+			err = nil
+			return err
 		}
 	}
 	n = binary.BigEndian.Uint16(buf)
@@ -147,7 +154,8 @@ func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 	}
 	if n > uint16(len(buf)) {
 		logrus.Warn("received packet with len: ", n)
-		return io.ErrShortBuffer
+		err = io.ErrShortBuffer
+		return err
 	}
 	// keep reading
 	readbytes := uint16(3)
