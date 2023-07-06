@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"math/rand"
 	"net"
@@ -417,32 +416,34 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 
 	m, err = tsc.conn.Read(buf[:3])
 
-	if m == 0 && err != nil {
+	if err != nil {
 		if errors.As(err, &errNet) && errNet.Timeout() {
 			return nil, nil
 		}
 		return nil, err
 	}
+
 	n = binary.BigEndian.Uint16(buf)
 	if n > uint16(len(buf)) {
 		logrus.Warn("bad serialized packet, with len: ", n, " closing connection")
-		logrus.Warn(fmt.Sprintf("read buf: %+v", buf))
 		tsc.conn.Close()
 		return nil, io.ErrShortBuffer
 	}
-	err = tsc.conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-	if err != nil {
-		return nil, err
+	// keep receiving until total packet arrive
+	readBytes := uint16(3)
+	for readBytes < n {
+		err = tsc.conn.SetReadDeadline(time.Now().Add(time.Second * 5))
+		if err != nil {
+			return nil, err
+		}
+		m, err = tsc.conn.Read(buf[3:n])
+		if err != nil {
+			logrus.Warn("return err: ", err, "at this point connections should be closed")
+			return nil, err
+		}
+		readBytes += uint16(m)
 	}
-	m, err = tsc.conn.Read(buf[3:n])
-	if m == 0 && err != nil {
-		logrus.Warn("return err: ", err, "at this point connections should be closed")
-		return nil, err
-	}
-	if m != int(n-3) {
-		logrus.Warn("bad read value m:", m, "n:", n, "n-3:", n-3)
-		return nil, io.ErrShortBuffer
-	}
+
 	rtn := &packets.MoleContainerPacket{}
 	rtn.FromBytes(buf[:n])
 	return rtn, nil

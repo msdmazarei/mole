@@ -104,7 +104,7 @@ func (t *TCPClient) start() {
 
 		err = t.fetchAndProcessPkt(netDev)
 		if err != nil {
-			logrus.Error("fetch and process packet error", err)
+			logrus.Error("fetch and process packet error: ", err)
 			return
 		}
 
@@ -122,39 +122,53 @@ func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 		netErr net.Error
 		cpkt   packets.MoleContainerPacket
 		n      uint16
+		m      int
 		buf    = make([]byte, t.MTU+extraBufferBytes)
 	)
 	err = t.Conn.SetReadDeadline(time.Now().Add(time.Millisecond))
 	if err != nil {
 		return err
 	}
-	_, err = t.Conn.Read(buf[:3])
-	if err != nil {
+	m, err = t.Conn.Read(buf[:3])
+	if m == 0 && err != nil {
 		if !errors.As(err, &netErr) {
 			return err
 		}
-		if netErr != nil && !netErr.Timeout() {
+		if !netErr.Timeout() {
 			logrus.Error("read error", err)
 			return err
+		} else {
+			return nil
 		}
 	}
 	n = binary.BigEndian.Uint16(buf)
-
 	if n == 0 {
 		return nil
 	}
-	err = t.Conn.SetReadDeadline(time.Now().Add(time.Millisecond))
-	if err != nil {
-		return err
+	if n > uint16(len(buf)) {
+		logrus.Warn("received packet with len: ", n)
+		return io.ErrShortBuffer
 	}
-	_, err = t.Conn.Read(buf[3:n])
-	if err != nil {
-		return err
+	// keep reading
+	readbytes := uint16(3)
+	for readbytes < n {
+		err = t.Conn.SetReadDeadline(time.Now().Add(time.Second))
+		if err != nil {
+			logrus.Warn("timeout 2", err)
+			return err
+		}
+
+		m, err = t.Conn.Read(buf[readbytes:n])
+		if m == 0 && err != nil {
+			return err
+		}
+		readbytes += uint16(m)
 	}
+
 	err = cpkt.FromBytes(buf[:n])
 	if err != nil {
 		//nolint:nilerr // bad packet format, ignore it
-		return nil
+		return err
 	}
 
 	t.lastRecvPktTime = time.Now()
