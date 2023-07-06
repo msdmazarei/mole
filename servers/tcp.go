@@ -466,6 +466,11 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 		err = io.ErrShortBuffer 
 		return nil, err
 	}
+	if n == 0 {
+		logrus.Warn("received buf with len 0")
+		err = nil
+		return nil, err
+	}
 	err = tsc.ReadNByteWithTimeout(buf[3:n], time.Second)
 	if err!=nil {
 		if isNetworkTimeout(err){
