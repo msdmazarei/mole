@@ -419,8 +419,7 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 		return nil, err
 	}
 
-	m, err = tsc.conn.Read(buf[:3])
-
+	_, err = tsc.conn.Read(buf[:3])
 	if err != nil {
 		if errors.As(err, &errNet) && errNet.Timeout() {
 			err = nil
@@ -443,7 +442,7 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 		if err != nil {
 			return nil, err
 		}
-		m, err = tsc.conn.Read(buf[3:n])
+		m, err = tsc.conn.Read(buf[readBytes:n])
 		if err != nil {
 			logrus.Warn("return err: ", err, "at this point connections should be closed")
 			return nil, err
