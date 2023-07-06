@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -116,13 +117,47 @@ func (t *TCPClient) start() {
 	}
 	logrus.Error("for codition error", "state", t.fsm.Current())
 }
+func isNetworkTimeout(err error) bool{
+	var errNet net.Error
+ 	return errors.As(err, &errNet) && errNet.Timeout()
+}
+func (t *TCPClient) ReadNByteWithTimeout(buf []byte, timeout time.Duration) error {
+	var (
+		err error
+		readBytes int
+		m int
+	)
+
+	err = t.Conn.SetReadDeadline(time.Now().Add(timeout))
+	if err!=nil {
+		return err
+	}	
+	readBytes, err = t.Conn.Read(buf)
+	if err!=nil {
+		return err
+	}
+	for readBytes < len(buf) {
+		err = t.Conn.SetReadDeadline(time.Now().Add(timeout))
+		if err!=nil {
+			return err
+		}			
+		m, err = t.Conn.Read(buf[readBytes:])
+		if err!=nil {
+			//because timeout in this step causes bad buffer, so its  not timeout, it means server is down
+			if isNetworkTimeout(err){
+				err = io.ErrNoProgress
+			}
+			return err
+		}
+		readBytes += m
+	}
+	return nil
+}
 func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 	var (
 		err    error
-		netErr net.Error
 		cpkt   packets.MoleContainerPacket
 		n      uint16
-		m      int
 		buf    = make([]byte, t.MTU+extraBufferBytes)
 	)
 	defer func(){
@@ -131,23 +166,12 @@ func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 		}
 
 	}()
-	err = t.Conn.SetReadDeadline(time.Now().Add(time.Millisecond))
-	if err != nil {
+	err = t.ReadNByteWithTimeout(buf[:3],time.Millisecond)
+	if isNetworkTimeout(err) {
+		err = nil
 		return err
 	}
-	_, err = t.Conn.Read(buf[:3])
-	if err != nil {
-		if !errors.As(err, &netErr) {
-			return err
-		}
-		if !netErr.Timeout() {
-			logrus.Error("read error", err)
-			return err
-		} else {
-			err = nil
-			return err
-		}
-	}
+	
 	n = binary.BigEndian.Uint16(buf)
 	if n == 0 {
 		return nil
@@ -157,24 +181,17 @@ func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 		err = io.ErrShortBuffer
 		return err
 	}
-	// keep reading
-	readbytes := uint16(3)
-	for readbytes < n {
-		err = t.Conn.SetReadDeadline(time.Now().Add(time.Second))
-		if err != nil {
-			logrus.Warn("timeout 2", err)
-			return err
+	err = t.ReadNByteWithTimeout(buf[3:n], time.Second)
+	if err!=nil {
+		if isNetworkTimeout(err){
+			err = io.ErrNoProgress
 		}
-
-		m, err = t.Conn.Read(buf[readbytes:n])
-		if m == 0 && err != nil {
-			return err
-		}
-		readbytes += uint16(m)
+		return err
 	}
 
 	err = cpkt.FromBytes(buf[:n])
 	if err != nil {
+		logrus.Warn(fmt.Sprintf("bad packet format : %+v", buf[:n]))
 		//nolint:nilerr // bad packet format, ignore it
 		return err
 	}

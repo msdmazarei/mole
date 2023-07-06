@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
@@ -343,11 +344,52 @@ func (tsc *tcpServerClient) pipeLocalPacketsToRemote() {
 			if errors.As(err, &errNet) && errNet.Timeout() {
 				continue
 			}
-			logrus.Error("msg", "could not send over buffer", "err", err.Error())
+			logrus.Error("msg ", " could not send over buffer", " err", err.Error(), " canceling context and closing connection")
+			tsc.cancel()
+			tsc.conn.Close()
+			return
 		}
 	}
 
 }
+func isNetworkTimeout(err error) bool{
+	var errNet net.Error
+ 	return errors.As(err, &errNet) && errNet.Timeout()
+}
+
+func (t *tcpServerClient) ReadNByteWithTimeout(buf []byte, timeout time.Duration) error {
+	var (
+		err error
+		readBytes int
+		m int
+	)
+
+	err = t.conn.SetReadDeadline(time.Now().Add(timeout))
+	if err!=nil {
+		return err
+	}	
+	readBytes, err = t.conn.Read(buf)
+	if err!=nil {
+		return err
+	}
+	for readBytes < len(buf) {
+		err = t.conn.SetReadDeadline(time.Now().Add(timeout))
+		if err!=nil {
+			return err
+		}			
+		m, err = t.conn.Read(buf[readBytes:])
+		if err!=nil {
+			//because timeout in this step causes bad buffer, so its  not timeout, it means client is down
+			if isNetworkTimeout(err){
+				err = io.ErrNoProgress
+			}
+			return err
+		}
+		readBytes += m
+	}
+	return nil
+}
+
 
 func (tsc *tcpServerClient) authenticating() error {
 
@@ -404,30 +446,19 @@ func (tsc *tcpServerClient) sendAuthAcceptedPacket() error {
 func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 	var (
 		err    error
-		errNet net.Error
 		buf    []byte = make([]byte, tsc.server.MTU+extraBufSize)
 		n      uint16
-		m      int
 	)
 	defer func(){
 		if err!=nil {
 			logrus.Warn("closing cause of : ", err)
 		}
 	}()
-	err = tsc.conn.SetReadDeadline(time.Now().Add(time.Millisecond))
-	if err != nil {
+	err = tsc.ReadNByteWithTimeout(buf[:3], time.Second)
+	if isNetworkTimeout(err){
+		err = nil
 		return nil, err
 	}
-
-	_, err = tsc.conn.Read(buf[:3])
-	if err != nil {
-		if errors.As(err, &errNet) && errNet.Timeout() {
-			err = nil
-			return nil, nil
-		}
-		return nil, err
-	}
-
 	n = binary.BigEndian.Uint16(buf)
 	if n > uint16(len(buf)) {
 		logrus.Warn("bad serialized packet, with len: ", n, " closing connection")
@@ -435,23 +466,23 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 		err = io.ErrShortBuffer 
 		return nil, err
 	}
-	// keep receiving until total packet arrive
-	readBytes := uint16(3)
-	for readBytes < n {
-		err = tsc.conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-		if err != nil {
-			return nil, err
+	err = tsc.ReadNByteWithTimeout(buf[3:n], time.Second)
+	if err!=nil {
+		if isNetworkTimeout(err){
+			err = io.ErrNoProgress
 		}
-		m, err = tsc.conn.Read(buf[readBytes:n])
-		if err != nil {
-			logrus.Warn("return err: ", err, "at this point connections should be closed")
-			return nil, err
-		}
-		readBytes += uint16(m)
+		return nil, err
 	}
 
 	rtn := &packets.MoleContainerPacket{}
-	rtn.FromBytes(buf[:n])
+	err = rtn.FromBytes(buf[:n])
+	if err != nil {
+		logrus.Warn(fmt.Sprintf("bad packet format : %+v", buf[:n]))
+		//nolint:nilerr // bad packet format, ignore it
+		return nil, err
+	}
+
+err = nil
 	return rtn, nil
 }
 
