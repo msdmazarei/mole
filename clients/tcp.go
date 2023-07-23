@@ -117,34 +117,34 @@ func (t *TCPClient) start() {
 	}
 	logrus.Error("for codition error", "state", t.fsm.Current())
 }
-func isNetworkTimeout(err error) bool{
+func isNetworkTimeout(err error) bool {
 	var errNet net.Error
- 	return errors.As(err, &errNet) && errNet.Timeout()
+	return errors.As(err, &errNet) && errNet.Timeout()
 }
 func (t *TCPClient) ReadNByteWithTimeout(buf []byte, timeout time.Duration) error {
 	var (
-		err error
+		err       error
 		readBytes int
-		m int
+		m         int
 	)
 
 	err = t.Conn.SetReadDeadline(time.Now().Add(timeout))
-	if err!=nil {
+	if err != nil {
 		return err
-	}	
+	}
 	readBytes, err = t.Conn.Read(buf)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	for readBytes < len(buf) {
 		err = t.Conn.SetReadDeadline(time.Now().Add(timeout))
-		if err!=nil {
+		if err != nil {
 			return err
-		}			
+		}
 		m, err = t.Conn.Read(buf[readBytes:])
-		if err!=nil {
+		if err != nil {
 			//because timeout in this step causes bad buffer, so its  not timeout, it means server is down
-			if isNetworkTimeout(err){
+			if isNetworkTimeout(err) {
 				err = io.ErrNoProgress
 			}
 			return err
@@ -155,23 +155,24 @@ func (t *TCPClient) ReadNByteWithTimeout(buf []byte, timeout time.Duration) erro
 }
 func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 	var (
-		err    error
-		cpkt   packets.MoleContainerPacket
-		n      uint16
-		buf    = make([]byte, t.MTU+extraBufferBytes)
+		err  error
+		cpkt packets.MoleContainerPacket
+		n    uint16
+		buf  = make([]byte, t.MTU+extraBufferBytes)
 	)
-	defer func(){
-		if err!=nil {
+	defer func() {
+		if err != nil {
 			logrus.Warn("closing connection cause of :", err)
+			netDev.Close() // not sure if should be here
 		}
 
 	}()
-	err = t.ReadNByteWithTimeout(buf[:3],time.Millisecond)
+	err = t.ReadNByteWithTimeout(buf[:3], time.Millisecond)
 	if isNetworkTimeout(err) {
 		err = nil
 		return err
 	}
-	
+
 	n = binary.BigEndian.Uint16(buf)
 	if n == 0 {
 		return nil
@@ -182,8 +183,8 @@ func (t *TCPClient) fetchAndProcessPkt(netDev io.ReadWriteCloser) error {
 		return err
 	}
 	err = t.ReadNByteWithTimeout(buf[3:n], time.Second)
-	if err!=nil {
-		if isNetworkTimeout(err){
+	if err != nil {
+		if isNetworkTimeout(err) {
 			err = io.ErrNoProgress
 		}
 		return err

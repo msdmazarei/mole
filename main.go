@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/msdmazarei/mole/clients"
@@ -25,14 +27,16 @@ type (
 	netProtocol   string
 
 	cfg struct {
-		operationMode      operationMode
-		address            net.IP
-		port               int
-		proto              netProtocol
-		username           string
-		secret             string
-		onConnectScript    string
-		onDisconnectScript string
+		operationMode        operationMode
+		address              net.IP
+		port                 int
+		proto                netProtocol
+		username             string
+		secret               string
+		onConnectScript      string
+		onDisconnectScript   string
+		socks5ProxyIPAddress net.IP
+		socks5ProxyPort      int
 	}
 )
 
@@ -78,6 +82,8 @@ func parseArgs() cfg {
 	onConnectScript := flag.String("onconnect", "", "script path to execute with device name once get connected")
 	onDisconnectScript := flag.String("ondisconnect", "", "script path to execute with device name once get disconnected")
 
+	socks5Proxy := flag.String("socks5-proxy", "", "to use this address to proxy, it should be in IPv4:PORT format like: 127.0.0.1:1090")
+
 	flag.Parse()
 	rtn := cfg{}
 	switch *operationMode {
@@ -117,6 +123,31 @@ func parseArgs() cfg {
 	rtn.proto = netProtocol(*proto)
 	rtn.onConnectScript = *onConnectScript
 	rtn.onDisconnectScript = *onDisconnectScript
+
+	if *socks5Proxy != "" {
+		parts := strings.Split(*socks5Proxy, ":")
+		if len(parts) != 2 {
+			logrus.Error("Bad format socks5-proxy, it should be IPv4:Port")
+			os.Exit(exitCodeBadArg)
+		}
+		proxyIP := net.ParseIP(parts[0])
+		if proxyIP == nil {
+			logrus.Error("Bad IP Address in socks5-proxy")
+			os.Exit(exitCodeBadArg)
+		}
+		proxyPort, e := strconv.ParseInt(parts[1], 10, 16)
+		if e != nil {
+			logrus.Error("Bad Port in socks5-proxy")
+			os.Exit(exitCodeBadArg)
+		} else if proxyPort < 0 || proxyPort > 65535 {
+			logrus.Error("Bad Port in socks5-proxy")
+			os.Exit(exitCodeBadArg)
+		} else {
+
+		}
+		rtn.socks5ProxyIPAddress = proxyIP
+		rtn.socks5ProxyPort = int(proxyPort)
+	}
 	return rtn
 }
 func main() {
@@ -277,8 +308,27 @@ func runClient(ctx context.Context, clientPB clients.UDPClientPB) {
 	}
 }
 func runTCPClient(ctx context.Context, clientPB clients.TCPClientPB) {
+	var (
+		conn net.Conn
+		err  error
+	)
 	for ctx.Err() == nil {
-		conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: appCfg.address, Port: appCfg.port})
+		if appCfg.socks5ProxyIPAddress != nil {
+			conn, err = net.DialTCP("tcp", nil, &net.TCPAddr{IP: appCfg.socks5ProxyIPAddress, Port: appCfg.socks5ProxyPort})
+			if err != nil {
+				logrus.Error("error in dialing socks proxy remote address", err)
+				os.Exit(exitCodeBadArg)
+			}
+			conn, err = connectThroughSocks5TCP(conn)
+			if err != nil {
+				logrus.Error("error in connecting through socks proxy remote address", err)
+				<-time.After(clientRetryDelay)
+				continue
+			}
+		} else {
+			conn, err = net.DialTCP("tcp", nil, &net.TCPAddr{IP: appCfg.address, Port: appCfg.port})
+		}
+
 		if err != nil {
 			logrus.Error("error in dialing udp remote address", err)
 			os.Exit(exitCodeBadArg)

@@ -7,21 +7,21 @@ import (
 type PacketType byte
 
 const (
-	AuthRequestType PacketType = iota
-	AuthRejectType
-	AuthAcceptType
+	AuthRequestType PacketType = 0
+	AuthRejectType  PacketType = 1
+	AuthAcceptType  PacketType = 2
 
-	PingType
-	PongType
+	PingType PacketType = 3
+	PongType PacketType = 4
 
-	ReportType
+	ReportType PacketType = 5
 
-	EncapsulatedNetDevPacketType
+	EncapsulatedNetDevPacketType PacketType = 6
 
-	DisconnectRequestType
-	DisconnectAcceptType
+	DisconnectRequestType PacketType = 7
+	DisconnectAcceptType  PacketType = 8
 
-	ContainerPacketType
+	ContainerPacketType PacketType = 9
 )
 
 var (

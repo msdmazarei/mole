@@ -300,6 +300,7 @@ func (tsc *tcpServerClient) onSuccessAuthentication(authReq packets.AuthRequestP
 	tsc.authPkt = authReq
 	tsc.localNetDev, err = tsc.server.GetTunDev(authReq.Username, tsc.tunDevProps)
 	if err != nil {
+		logrus.Error("onSuccessAuthentication - ", err)
 		return err
 	}
 	// make it enable
@@ -467,7 +468,7 @@ func (tsc *tcpServerClient) readPacket() (*packets.MoleContainerPacket, error) {
 		return nil, err
 	}
 	if n == 0 {
-		logrus.Warn("received buf with len 0")
+		// logrus.Warn("received buf with len 0")
 		err = nil
 		return nil, err
 	}
