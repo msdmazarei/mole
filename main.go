@@ -27,16 +27,21 @@ type (
 	netProtocol   string
 
 	cfg struct {
-		operationMode        operationMode
-		address              net.IP
-		port                 int
-		proto                netProtocol
-		username             string
-		secret               string
-		onConnectScript      string
-		onDisconnectScript   string
-		socks5ProxyIPAddress net.IP
-		socks5ProxyPort      int
+		operationMode             operationMode
+		address                   net.IP
+		port                      int
+		proto                     netProtocol
+		username                  string
+		secret                    string
+		onConnectScript           string
+		onDisconnectScript        string
+		socks5ProxyIPAddress      net.IP
+		socks5ProxyPort           int
+		httpForwardProxyIPAddress net.IP
+		httpForwardProxyPort      int
+		httpForwardProxySSL       bool
+		httpForwardProxyUsername  string
+		httpForwardProxyPassword  string
 	}
 )
 
@@ -83,6 +88,9 @@ func parseArgs() cfg {
 	onDisconnectScript := flag.String("ondisconnect", "", "script path to execute with device name once get disconnected")
 
 	socks5Proxy := flag.String("socks5-proxy", "", "to use this address to proxy, it should be in IPv4:PORT format like: 127.0.0.1:1090")
+	httpForwardProxy := flag.String("http-proxy", "", "to use this address as http proxy which supports CONNECT verb, format like: http(s)://IPv4:PORT")
+	httpForwardProxyUsername := flag.String("http-proxy-username", "", "basic auth user name for http proxy")
+	httpForwardProxyPassword := flag.String("http-proxy-password", "", "basic auth password for http proxy")
 
 	flag.Parse()
 	rtn := cfg{}
@@ -147,6 +155,42 @@ func parseArgs() cfg {
 		}
 		rtn.socks5ProxyIPAddress = proxyIP
 		rtn.socks5ProxyPort = int(proxyPort)
+	}
+	if *httpForwardProxy != "" {
+		fmt.Printf("%s\n", *httpForwardProxy)
+		isSecure := false
+		skip := len("http://")
+		if strings.HasPrefix(*httpForwardProxy, "https://") {
+			isSecure = true
+			skip++
+		}
+		hostport := (*httpForwardProxy)[skip:]
+		parts := strings.Split(hostport, ":")
+		if len(parts) != 2 {
+			logrus.Error("Bad http-proxy, its format should be http(s)://ipv4:port")
+			os.Exit(exitCodeBadArg)
+		}
+		httpProxyIP := net.ParseIP(parts[0])
+		if httpProxyIP == nil {
+			logrus.Error("could not parse IPv4 part of http-proxy")
+			os.Exit(exitCodeBadArg)
+		}
+		httpProxyPort, e := strconv.ParseInt(parts[1], 10, 16)
+		if e != nil {
+			logrus.Error("could not parse Port part of http-proxy", e)
+			os.Exit(exitCodeBadArg)
+		}
+		if httpProxyPort < 0 || httpProxyPort > 65535 {
+			logrus.Error("invalid port number for http-proxy")
+			os.Exit(exitCodeBadArg)
+		}
+		rtn.httpForwardProxyIPAddress = httpProxyIP
+		rtn.httpForwardProxyPort = int(httpProxyPort)
+		rtn.httpForwardProxySSL = isSecure
+		if *httpForwardProxyUsername != "" {
+			rtn.httpForwardProxyUsername = *httpForwardProxyUsername
+			rtn.httpForwardProxyPassword = *httpForwardProxyPassword
+		}
 	}
 	return rtn
 }
@@ -313,7 +357,21 @@ func runTCPClient(ctx context.Context, clientPB clients.TCPClientPB) {
 		err  error
 	)
 	for ctx.Err() == nil {
-		if appCfg.socks5ProxyIPAddress != nil {
+		fmt.Printf("%#v\n", appCfg)
+		if appCfg.httpForwardProxyIPAddress != nil {
+			conn, err = net.DialTCP("tcp", nil, &net.TCPAddr{IP: appCfg.httpForwardProxyIPAddress, Port: appCfg.httpForwardProxyPort})
+			if err != nil {
+				logrus.Error("error in dialing http proxy remote address", err)
+				os.Exit(exitCodeBadArg)
+			}
+			err = connectThroughHttpProxy(conn, authTimeout)
+			if err != nil {
+				logrus.Error("error in connecting through http proxy remote address", err)
+				<-time.After(clientRetryDelay)
+				continue
+			}
+
+		} else if appCfg.socks5ProxyIPAddress != nil {
 			conn, err = net.DialTCP("tcp", nil, &net.TCPAddr{IP: appCfg.socks5ProxyIPAddress, Port: appCfg.socks5ProxyPort})
 			if err != nil {
 				logrus.Error("error in dialing socks proxy remote address", err)
